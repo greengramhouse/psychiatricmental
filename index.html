@@ -387,7 +387,7 @@
 
       // ฟังก์ชันใหม่: โหลดข้อมูลพร้อมกัน (Parallel)
       async function loadAllDataConcurrently() {
-        const url = "https://script.google.com/macros/s/AKfycbz5TXC01ZjZveLwhuwna-E0hfoao014V1U44ugKC8NGijJRkRm2asQzDb6WtAYwIn7NkA/exec";
+        const url = "https://script.google.com/macros/s/AKfycbwYqbE9bA_Ij-TDOUALdgtW9SngTCC53CxSIfXfjRUaE4_drqzSE90MmeSqLLpEGDKs/exec";
         
         // เตรียมคำขอโหลดข้อสอบ
         const formQuiz = new FormData();
@@ -900,7 +900,7 @@
 
       async function sendScoreToGoogleSheet(setTitle, score, totalQuestions, percentage, isPassed, answers) {
         try {
-          const url = "https://script.google.com/macros/s/AKfycbz5TXC01ZjZveLwhuwna-E0hfoao014V1U44ugKC8NGijJRkRm2asQzDb6WtAYwIn7NkA/exec";
+          const url = "https://script.google.com/macros/s/AKfycbwYqbE9bA_Ij-TDOUALdgtW9SngTCC53CxSIfXfjRUaE4_drqzSE90MmeSqLLpEGDKs/exec";
           const formData = new FormData();
           formData.append("action", "savescore"); 
           formData.append("userId", userId);
