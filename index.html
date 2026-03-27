@@ -892,9 +892,23 @@
         try {
           const flexMessage = buildScoreFlexMessage(setTitle, score, totalQuestions, percentage, isPassed);
           await liff.shareTargetPicker([flexMessage], { isMultiple: true });
+          
+          // กลับไปที่หน้าหลัก (home-page) หลังจากแชร์เสร็จสิ้น
+          Swal.fire({
+             title: 'ส่งผลคะแนนเรียบร้อย',
+             icon: 'success',
+             timer: 1500,
+             showConfirmButton: false
+          }).then(() => {
+             pageChange('home-page');
+          });
+
         } catch (error) {
           console.error('❌ เกิดข้อผิดพลาดในการแชร์:', error);
-          Swal.fire('ไม่สามารถแชร์ได้', 'กรุณาลองใหม่อีกครั้ง หรือเข้าสู่ระบบ LINE', 'error');
+          Swal.fire('การแชร์ถูกยกเลิก', 'หรือเกิดข้อผิดพลาดจากระบบ LINE', 'warning').then(() => {
+             // หากยกเลิกก็กลับไปหน้าแรกเช่นกัน (หรือจะปล่อยให้อยู่หน้าเดิมก็ได้ แต่ตรงนี้ใส่ให้กลับหน้าแรกตาม Flow ที่ลื่นไหล)
+             pageChange('home-page');
+          });
         }
       }
 
