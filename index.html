@@ -319,8 +319,34 @@
       const startQuizBtn = document.getElementById("start-quiz-btn");
 
       window.addEventListener("load", async () => {
-        await initializeLIFF();
-        await loadQuestions();
+        try {
+          if (typeof initNavbarToggle === 'function') initNavbarToggle();
+        } catch (e) {
+          console.warn('initNavbarToggle failed:', e);
+        }
+
+        // 1. เปิดหน้าโหลดข้อมูล
+        const loadingOverlay = document.getElementById("loading-overlay");
+        if (loadingOverlay) loadingOverlay.style.display = "flex";
+
+        try {
+          // 2. รอ LIFF Init แค่แปปเดียว
+          await initializeLIFF();
+          
+          // 3. โหลดข้อสอบ และ โหลดคะแนนเก่า **พร้อมๆ กัน** เพื่อลดเวลาโหลด 2 เท่า
+          await loadAllDataConcurrently();
+          
+          setTimeout(() => {
+            initResultPage();
+          }, 200);
+
+        } catch (error) {
+          Swal.fire("เกิดข้อผิดพลาด", "ไม่สามารถโหลดข้อมูลได้ กรุณารีเฟรชหน้าเว็บอีกครั้ง", "error");
+          console.error(error);
+        } finally {
+          // 4. ไม่ว่าจะสำเร็จหรือพัง ต้องปิดหน้า Loading เสมอ (ป้องกันการหมุนค้าง)
+          if (loadingOverlay) loadingOverlay.style.display = "none";
+        }
 
         const setSelect = document.getElementById("set-select");
         if (setSelect) {
@@ -337,12 +363,6 @@
               currentQuestionIndex = 0;
             }
           });
-        }
-
-        try {
-          if (typeof initNavbarToggle === 'function') initNavbarToggle();
-        } catch (e) {
-          console.warn('initNavbarToggle failed:', e);
         }
       });
 
@@ -365,83 +385,84 @@
         }
       }
 
-      async function loadQuestions() {
+      // ฟังก์ชันใหม่: โหลดข้อมูลพร้อมกัน (Parallel)
+      async function loadAllDataConcurrently() {
+        const url = "https://script.google.com/macros/s/AKfycbz5TXC01ZjZveLwhuwna-E0hfoao014V1U44ugKC8NGijJRkRm2asQzDb6WtAYwIn7NkA/exec";
+        
+        // เตรียมคำขอโหลดข้อสอบ
+        const formQuiz = new FormData();
+        formQuiz.append("action", "getquiz");
+
+        // เตรียมคำขอโหลดข้อมูลเก่า
+        const formUser = new FormData();
+        formUser.append("action", "getuserdata");
+        formUser.append("userId", userId);
+
+        // ตัวจับเวลา (Timeout) ป้องกัน GAS ค้างเกิน 15 วินาที
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); 
+
         try {
-          const loadingOverlay = document.getElementById("loading-overlay");
-          if (loadingOverlay) loadingOverlay.style.display = "flex";
+          // ยิง 2 Request ไปหา GAS พร้อมกัน!
+          const [quizRes, userRes] = await Promise.all([
+            fetch(url, { method: "POST", body: formQuiz, signal: controller.signal }),
+            fetch(url, { method: "POST", body: formUser, signal: controller.signal })
+          ]);
 
-          document.getElementById("quiz-wrapper").style.display = "none";
-          const url = "https://script.google.com/macros/s/AKfycbwYqbE9bA_Ij-TDOUALdgtW9SngTCC53CxSIfXfjRUaE4_drqzSE90MmeSqLLpEGDKs/exec";
+          clearTimeout(timeoutId); // ปิดตัวจับเวลาเมื่อเสร็จ
 
-          const formData = new FormData();
-          formData.append("action", "getquiz"); 
-
-          const res = await fetch(url, { method: "POST", body: formData });
-          if (!res.ok) throw new Error("โหลดข้อมูลจาก Apps Script ไม่สำเร็จ");
+          if (!quizRes.ok) throw new Error("โหลดข้อมูลข้อสอบล้มเหลว");
           
-          setsData = await res.json();
-          
+          // จัดการข้อมูลข้อสอบ
+          setsData = await quizRes.json();
           const setOptions = setsData.map((set) => set.title);
           createDropdown(setOptions, "set-select", "เลือกชุดคำถาม");
 
-          await loadUserPreviousData(userId);
-
-          setTimeout(() => {
-            initResultPage();
-          }, 200);
+          // จัดการข้อมูลคะแนนเก่า (ถ้ามี)
+          if (userRes.ok) {
+             const userData = await userRes.json();
+             processUserPreviousData(userData);
+          } else {
+             showListSetTest(); // ถ้าไม่มีข้อมูลเก่า ก็แสดงรายการข้อสอบเปล่าๆ ไป
+          }
 
         } catch (e) {
-          Swal.fire("โหลดคำถามล้มเหลว", e.message, "error");
-          console.error(e);
-        } finally {
-          const loadingOverlay = document.getElementById("loading-overlay");
-          if (loadingOverlay) loadingOverlay.style.display = "none";
+          if (e.name === 'AbortError') {
+             throw new Error("เซิร์ฟเวอร์ตอบสนองช้าเกินไป (Timeout)");
+          }
+          throw e;
         }
       }
 
-      async function loadUserPreviousData(userId) {
-        try {
-          const url = "https://script.google.com/macros/s/AKfycbwYqbE9bA_Ij-TDOUALdgtW9SngTCC53CxSIfXfjRUaE4_drqzSE90MmeSqLLpEGDKs/exec";
-          const formData = new FormData();
-          formData.append("action", "getuserdata"); 
-          formData.append("userId", userId);
+      // แยกฟังก์ชันจัดการข้อมูลเก่าออกมาให้เป็นระเบียบ
+      function processUserPreviousData(data) {
+        if (data && Array.isArray(data)) {
+          data.forEach((record) => {
+            const setTitle = record.setTitle;
+            const score = parseInt(record.score) || 0;
+            const totalQuestions = parseInt(record.totalQuestions) || 1;
+            const savedAnswers = record.answers || []; 
 
-          const res = await fetch(url, { method: "POST", body: formData });
-          if (!res.ok) return;
-
-          const data = await res.json();
-
-          if (data && Array.isArray(data)) {
-            data.forEach((record) => {
-              const setTitle = record.setTitle;
-              const score = parseInt(record.score) || 0;
-              const totalQuestions = parseInt(record.totalQuestions) || 1;
-              const savedAnswers = record.answers || []; 
-
-              if (!userAnswers[setTitle]) {
-                userAnswers[setTitle] = {
-                  answers: Array.isArray(savedAnswers) ? [...savedAnswers] : new Array(totalQuestions).fill(null),
-                  score: score,
-                };
-              } else {
-                userAnswers[setTitle].score = score;
-                if (Array.isArray(savedAnswers) && savedAnswers.length > 0) {
-                  userAnswers[setTitle].answers = [...savedAnswers];
-                }
+            if (!userAnswers[setTitle]) {
+              userAnswers[setTitle] = {
+                answers: Array.isArray(savedAnswers) ? [...savedAnswers] : new Array(totalQuestions).fill(null),
+                score: score,
+              };
+            } else {
+              userAnswers[setTitle].score = score;
+              if (Array.isArray(savedAnswers) && savedAnswers.length > 0) {
+                userAnswers[setTitle].answers = [...savedAnswers];
               }
+            }
 
-              const setIndex = setsData.findIndex((s) => s.title === setTitle);
-              if (setIndex >= 0) {
-                submittedSets.add(setIndex);
-              }
-            });
-
-            updateDropdownLockStatus();
-            showListSetTest(); 
-          }
-        } catch (e) {
-          console.error("❌ เกิดข้อผิดพลาดในการดึงข้อมูลเก่า:", e);
+            const setIndex = setsData.findIndex((s) => s.title === setTitle);
+            if (setIndex >= 0) {
+              submittedSets.add(setIndex);
+            }
+          });
         }
+        updateDropdownLockStatus();
+        showListSetTest(); 
       }
 
       function showListSetTest() {
@@ -821,7 +842,7 @@
               contents: [
                 {
                   type: "text",
-                  text: "🧠 ผลทดสอบ",
+                  text: "🧠 ผลทดสอบสุขภาพจิต",
                   weight: "bold",
                   size: "md",
                   color: "#0f766e"
@@ -879,7 +900,7 @@
 
       async function sendScoreToGoogleSheet(setTitle, score, totalQuestions, percentage, isPassed, answers) {
         try {
-          const url = "https://script.google.com/macros/s/AKfycbwYqbE9bA_Ij-TDOUALdgtW9SngTCC53CxSIfXfjRUaE4_drqzSE90MmeSqLLpEGDKs/exec";
+          const url = "https://script.google.com/macros/s/AKfycbz5TXC01ZjZveLwhuwna-E0hfoao014V1U44ugKC8NGijJRkRm2asQzDb6WtAYwIn7NkA/exec";
           const formData = new FormData();
           formData.append("action", "savescore"); 
           formData.append("userId", userId);
